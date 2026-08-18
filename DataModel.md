@@ -7,10 +7,16 @@ https://www.drawdb.app/share/EcxUqhmlu3ZiqKceVulZS278
 The ports table is the same as the source with an addition of 2 columns
 1. ingested at timestamp
 2. source name
+
+## Seismic Events
+The Seismic table is the same as the source with an addition of 2 columns
+1. generated at timestamp
+2. ingested at timestamp
+3. source name
+
 ## Vessels
 TBD
-## Seismic Events
-TBD
+
 # **Silver Layer**
 ## Ports
 1. Enforce data types
@@ -95,10 +101,16 @@ harbor size
 / dry dock
 / railway
 
+## Seismic Events
+1. enforce data types
+2. rename columns for clarity
+
+lat -> Latitute
+lon -> Longitude 
+mag -> magnitude 
+
 
 ## Vessels
-TBD
-## Seismic Events
 TBD
 
 
@@ -120,7 +132,10 @@ create time dimension to use
 ### dim: Ports_communication 
 ### dim: Ports_supplies 
 
+## Seismic Events
+1. Add date column with datekey
+2. add time column with time key
 
 ## Vessels
-## Seismic Events
+TBD
 
