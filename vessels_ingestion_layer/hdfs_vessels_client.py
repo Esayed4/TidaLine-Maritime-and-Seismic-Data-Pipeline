@@ -5,7 +5,8 @@ import requests
 
 from datetime import date, datetime
 
-from .logger import Logger
+from logger.logger import Logger
+from utils.config import load_config
 
 
 logger = Logger(__name__)
@@ -14,11 +15,17 @@ logger = Logger(__name__)
 # ============================================================
 # Configuration
 # ============================================================
+config=load_config()
+
+# storage:
+#   temp_vessel_path: "/opt/airflow/temp/vessel"
+# LOCAL_VESSELS_PATH = "/opt/airflow/dags/temp/vessel" ## take care
+
 
 WEBHDFS_BASE_URL = "http://master1:9870/webhdfs/v1"
 HDFS_USER = "user"
 
-LOCAL_VESSELS_PATH = "/opt/airflow/dags/temp/vessel" ## take care
+LOCAL_VESSELS_PATH=config["storage"]["temp_vessel_path"]
 HDFS_VESSELS_PATH = "/bronze/vessels"
 
 

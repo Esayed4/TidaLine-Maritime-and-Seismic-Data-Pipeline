@@ -4,9 +4,9 @@ import paramiko
 import pandas as pd
 
 from datetime import datetime, date
-from .config import load_config
+from utils.config import load_config
 
-from .logger import Logger
+from logger.logger import Logger
 
 
 logger = Logger(__name__)

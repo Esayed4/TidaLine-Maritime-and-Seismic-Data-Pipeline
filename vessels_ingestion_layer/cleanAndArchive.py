@@ -3,9 +3,9 @@ import re
 import paramiko
 
 from datetime import datetime
-from .config import load_config
+from utils.config import load_config
 
-from .logger import Logger
+from logger.logger import Logger
 
 
 logger = Logger(__name__)
