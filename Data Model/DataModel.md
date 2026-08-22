@@ -120,6 +120,11 @@ mag -> magnitude
 3. add columns  
 loaded_to_silver: timestamp
 
+4. implement MERGE logic  
+a. if the record receives an update within the same day -> update the value  
+b. if the record received an update another day -> create new UNID and insert as a new record  
+    since the dashboard is viewed daily and we filter by day then we will only view the latest status and preserve history
+
 ## Vessels
 TBD
 
@@ -205,13 +210,6 @@ The layer will haave the following properties:
 1. a fact_ports_seismic_events table
 the table cross-joins the ports and earthquakes and calculates the **haversine distance** between the ports and earthquakes and then filters using parameters.
 
-2. the risk categorization of ports  
-The risk score is for each earthquake calculate 10^(magnitude) / distance^(2) 
-the 10^magnitude is because rechtar is an exponential scale. 
-The distance is squared because the destructive power has high decay rate.  
-The data is then dynamically partitioned into 3 categories (ntiles)
-
-
 ```SQL
 WITH fact_ports_earthquakes_distance AS (
     SELECT
@@ -240,16 +238,61 @@ WITH fact_ports_earthquakes_distance AS (
     FROM ports p
     CROSS JOIN earthquakes e
 ),
+```
+The actual code in M-Language is:
 
+```SQL
+let
+    Source = Dim_Port,
+    // attach the ENTIRE Dim_Earthquake table as one nested value on every port row
+    AddEvents = Table.AddColumn(Source, "EventsNested", each Dim_Earthquake),
+    Expanded = Table.ExpandTableColumn(
+        AddEvents,
+        "EventsNested",
+        {"UNID", "LAT", "LON", "MAG", "DEPTH", "GENERATED_AT"},
+        {"earthquake_id", "e_lat", "e_lon", "magnitude", "event_depth_km", "event_time"}
+    ),
+    // Haversine distance, in km
+    AddDistance = Table.AddColumn(Expanded, "distance_km", each
+        let
+            lat1 = [latitude] * Number.PI / 180,
+            lat2 = [e_lat] * Number.PI / 180,
+            dLat = lat2 - lat1,
+            dLon = ([e_lon] - [longitude]) * Number.PI / 180,
+            a = Number.Sin(dLat/2) * Number.Sin(dLat/2)
+              + Number.Cos(lat1) * Number.Cos(lat2) * Number.Sin(dLon/2) * Number.Sin(dLon/2),
+            c = 2 * Number.Asin(Number.Sqrt(a))
+        in
+            6371 * c,
+        type number
+    ),
+    // keep the table from exploding: cutoff generous enough to cover any threshold you'll expose to the user
+    FilterCutoff = Table.SelectRows(AddDistance, each [distance_km] <= 300),
+    SelectCols = Table.SelectColumns(FilterCutoff,
+        {"port_id", "earthquake_id", "event_time", "magnitude", "event_depth_km", "distance_km"})
+in
+    SelectCols
+```
+
+2. the risk categorization of ports  
+The risk score is for each earthquake calculate 10^(magnitude) / ( distance^(2) * SQRT(depth) ) 
+the 10^magnitude is because rechtar is an exponential scale. 
+The distance is squared because the destructive power has high decay rate.  
+The depth is decaying but at a slower rate than the distance -> a wave at level 0 is extremely destructive ! 
+The data is then dynamically partitioned into 3 categories (ntiles)
+
+The ports risk score in SQL is:
+
+```SQL
 ports_risk_scores AS (
     SELECT
         port_id,
         SUM(
             POWER(10, mag)
-            / POWER(distance_km + 1, 2)
+            / (POWER(distance_km + 1, 2) * POWER(depth_km + 1, 0.5))
         ) AS risk_score
     FROM distances
-    WHERE distance_km <= 50
+    WHERE distance_km <= 50 --This is a fixed number for the ranking
     GROUP BY port_id
 ),
 
@@ -274,4 +317,72 @@ SELECT
 FROM ranked_ports
 ORDER BY risk_score;
 ```
+The actual code in M-Language is:
 
+a. create a parameter to set the max_distance
+```SQL
+Max Distance (km) Value = SELECTEDVALUE('Max Distance (km)'[Max Distance (km)], 50)
+```
+b. create a custom columns risk_score for the dim_port
+```SQL
+    risk_score =
+    COALESCE(
+        CALCULATE(
+            SUMX(
+                fact_ports_events,
+                POWER(10, fact_ports_events[magnitude])
+                / POWER(fact_ports_events[distance_km] + 1, 2)
+                / POWER(fact_ports_events[event_depth_km] + 1, 0.5)
+            ),
+            fact_ports_events[distance_km] <= 50
+        ),
+        0
+    )
+```
+c. rank this columns
+```SQL
+    risk_rank =
+    RANKX(ALL(Dim_Port), Dim_Port[risk_score], , ASC, Skip)
+```
+d. categorize
+```SQL
+    risk_category =
+    VAR TotalPorts = COUNTROWS(ALL(Dim_Port))
+    VAR Bucket = ROUNDUP(Dim_Port[risk_rank] * 3 / TotalPorts, 0)
+    RETURN
+        SWITCH(
+            TRUE(),
+            Bucket <= 1, "Low",
+            Bucket = 2, "Medium",
+            "High"
+        )
+``` 
+
+
+## Other Tables:
+A union of the ports and earthquakes tables is created in order to plot them together, the code in DAX in PowerBI is 
+```SQL
+    Map_Points =
+    UNION(
+        SELECTCOLUMNS(
+            Dim_Earthquake,
+            "lat", Dim_Earthquake[LAT],
+            "lon", Dim_Earthquake[LON],
+            "point_type", "Earthquake",
+            "label", "Mag " & FORMAT(Dim_Earthquake[MAG], "0.0") & " - " & Dim_Earthquake[FLYNN_REGION],
+            "size_value", Dim_Earthquake[MAG],
+            "earthquake_id", Dim_Earthquake[UNID],
+            "port_id", BLANK()
+        ),
+        SELECTCOLUMNS(
+            Dim_Port,
+            "lat", Dim_Port[latitude],
+            "lon", Dim_Port[longitude],
+            "point_type", "Port",
+            "label", Dim_Port[port_name],
+            "size_value", 3,
+            "earthquake_id", BLANK(),
+            "port_id", Dim_Port[port_id]
+        )
+    )
+```
