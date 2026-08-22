@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      AIRFLOW_CONN_SFTP_PORTS_FILE: 'sftp://batch:batchpass@sftp:22'
+      AIRFLOW_CONN_SSH_WORKER4: 'ssh://user@172.25.0.3:22?private_key_file=%2Fhome%2Fairflow%2F.ssh%2Fid_ed25519'
+      AIRFLOW_CONN_SPARK_WORKER4: 'spark://yarn:8088'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql
+      - ./pagila.sql:/docker-entrypoint-initdb.d/02-pagila-schema.sql
+      - ./pagila-data.sql:/docker-entrypoint-initdb.d/03-pagila-data.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  sleek-airflow:
+    build: .
+    image: airflowdm:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW_CONN_APP_POSTGRES: postgresql://airflow:airflow@postgres:5432/app_db
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./ssh_keys:/home/airflow/.ssh
+    ports:
+      - "8080:8080"
+    command: airflow standalone
+    networks:
+      - default
+      - maritime-net
+      - bdss-cluster_bd_ss_nw
+      - tidaline-case-study-network
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: airflow_proj_default
+  maritime-net:
+    external: true
+  bdss-cluster_bd_ss_nw:
+    external: true
+  tidaline-case-study-network:
+    external: true
