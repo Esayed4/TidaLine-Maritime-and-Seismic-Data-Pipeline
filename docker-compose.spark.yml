@@ -1,0 +1,36 @@
+name: tidaline-spark
+
+services:
+  spark-streaming:
+    image: apache/spark:3.5.1
+    container_name: spark-streaming-job
+    user: root
+    volumes:
+      - ./stream:/app
+    command: >
+      /opt/spark/bin/spark-submit 
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,net.snowflake:spark-snowflake_2.12:3.0.0,net.snowflake:snowflake-jdbc:3.14.5 
+      /app/ods_stream.py
+    restart: unless-stopped
+    networks:
+      - shared-network
+
+  spark-batch-archive:
+    image: apache/spark:3.5.1
+    container_name: spark-batch-archive-job
+    user: root
+    volumes:
+      - ./stream:/app
+    command: >
+      /opt/spark/bin/spark-submit 
+      --packages net.snowflake:spark-snowflake_2.12:3.0.0,net.snowflake:snowflake-jdbc:3.14.5 
+      /app/archive_ods.py
+    profiles:
+      - batch     
+    networks:
+      - shared-network
+
+networks:
+  shared-network:
+    external: true
+    name: tidaline-case-study-network
