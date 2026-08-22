@@ -19,7 +19,11 @@ The Seismic table is the same as the source with an addition of 2 columns
 
 
 ## Vessels
-TBD
+The Seismic table is the same as the source with an addition of 2 columns
+1. generated at timestamp
+2. source name
+3. ingested at timestamp
+
 
 # **Silver Layer**
 
@@ -126,7 +130,8 @@ b. if the record received an update another day -> create new UNID and insert as
     since the dashboard is viewed daily and we filter by day then we will only view the latest status and preserve history
 
 ## Vessels
-TBD
+The vessels require minimal transformation and only minor column are added such as   
+loaded_to_silver: timestamp
 
 
 # **Gold Layer**
@@ -197,7 +202,7 @@ supplies_index_category:        varchar: 5 is excellent, >=3 is good, 1>=1 is li
 3. add time column with time key: integer
 
 ## Vessels
-TBD
+The vessels from the silver layer will be used as it is.
 
 
 # **Semantic Layer** 
@@ -292,7 +297,7 @@ ports_risk_scores AS (
             / (POWER(distance_km + 1, 2) * POWER(depth_km + 1, 0.5))
         ) AS risk_score
     FROM distances
-    WHERE distance_km <= 50 --This is a fixed number for the ranking
+    WHERE distance_km <= 300 --This is a fixed number for the ranking
     GROUP BY port_id
 ),
 
@@ -334,7 +339,7 @@ b. create a custom columns risk_score for the dim_port
                 / POWER(fact_ports_events[distance_km] + 1, 2)
                 / POWER(fact_ports_events[event_depth_km] + 1, 0.5)
             ),
-            fact_ports_events[distance_km] <= 50
+            fact_ports_events[distance_km] <= 300
         ),
         0
     )
@@ -366,23 +371,87 @@ A union of the ports and earthquakes tables is created in order to plot them tog
     UNION(
         SELECTCOLUMNS(
             Dim_Earthquake,
-            "lat", Dim_Earthquake[LAT],
-            "lon", Dim_Earthquake[LON],
-            "point_type", "Earthquake",
-            "label", "Mag " & FORMAT(Dim_Earthquake[MAG], "0.0") & " - " & Dim_Earthquake[FLYNN_REGION],
-            "size_value", Dim_Earthquake[MAG],
+            "lat",           Dim_Earthquake[LAT],
+            "lon",           Dim_Earthquake[LON],
+            "point_type",    "Earthquake",
+            "point_date",    DATE(YEAR(Dim_Earthquake[GENERATED_AT]), MONTH(Dim_Earthquake[GENERATED_AT]), DAY(Dim_Earthquake[GENERATED_AT])),
+            "label",
+                "Mag " & FORMAT(Dim_Earthquake[MAG], "0.0")
+                & " — " & Dim_Earthquake[FLYNN_REGION]
+                & UNICHAR(10) & "Depth: " & FORMAT(Dim_Earthquake[DEPTH], "0.0") & " km"
+                & UNICHAR(10) & FORMAT(Dim_Earthquake[GENERATED_AT], "mmm dd, yyyy hh:mm AM/PM"),
+            "size_value",    Dim_Earthquake[MAG],
             "earthquake_id", Dim_Earthquake[UNID],
-            "port_id", BLANK()
+            "port_id",       BLANK()
         ),
         SELECTCOLUMNS(
             Dim_Port,
-            "lat", Dim_Port[latitude],
-            "lon", Dim_Port[longitude],
-            "point_type", "Port",
-            "label", Dim_Port[port_name],
-            "size_value", 3,
+            "lat",           Dim_Port[latitude],
+            "lon",           Dim_Port[longitude],
+            "point_type",    "Port",
+            "point_date",    BLANK(),
+            "label",
+                "Port ID: " & Dim_Port[port_id]
+                & UNICHAR(10) & "Port Name: " & Dim_Port[port_name]
+                & UNICHAR(10) & "Country: " & COALESCE(Dim_Port[country_code], "Unknown")
+                & UNICHAR(10) & "Harbor size: " & COALESCE(Dim_Port[harbor_size], "Unknown")
+                & UNICHAR(10) & "Harbor type: " & COALESCE(Dim_Port[harbor_type], "Unknown")
+                & UNICHAR(10) & "Communications Index: " & Dim_Port[communications_index]
+                & UNICHAR(10) & "Communications Category: " & Dim_Port[communications_index_category]
+                & UNICHAR(10) & "Supplies Index: " & Dim_Port[supplies_index]
+                & UNICHAR(10) & "Supplies Category: " & Dim_Port[supplies_index_category],
+            "size_value",    4,
             "earthquake_id", BLANK(),
-            "port_id", Dim_Port[port_id]
+            "port_id",       Dim_Port[port_id]
         )
     )
 ```
+The following measures and parameters were used to filter by the date:  
+1. Days ago: a Data date parameter  
+2. Days ago: a data date measure  
+```SQL
+    Days Ago Value = SELECTEDVALUE('Days Ago'[Days Ago], 1)
+```
+3. Show on map: a measure that uses the parameter to filter out seismic events but keep ports
+```SQL
+    Show On Map =
+    VAR TargetDate = TODAY() - [Days Ago Value]
+    RETURN
+        IF(
+            SELECTEDVALUE(Map_Points[point_type]) = "Port",
+            1,
+            IF(SELECTEDVALUE(Map_Points[point_date]) = TargetDate, 1, 0)
+        )
+```
+### Applied Measures:
+```SQL
+    Total Earthquakes Shown =
+    CALCULATE(
+        COUNTROWS(Dim_Earthquake),
+        FILTER(Dim_Earthquake, [Is Selected Day] = 1)
+    )
+```  
+```SQL  
+    Average Magnitude =
+    CALCULATE(
+        AVERAGE(Dim_Earthquake[MAG]),
+        FILTER(Dim_Earthquake, [Is Selected Day] = 1)
+    )
+```
+```SQL
+    Max Magnitude =
+    CALCULATE(
+        MAX(Dim_Earthquake[MAG]),
+        FILTER(Dim_Earthquake, [Is Selected Day] = 1)
+    )
+```
+```SQL
+    Strongest Region =
+    VAR MaxMag = [Max Magnitude]
+    RETURN
+        CALCULATE(
+            SELECTEDVALUE(Dim_Earthquake[FLYNN_REGION]),
+            FILTER(Dim_Earthquake, [Is Selected Day] = 1),
+            Dim_Earthquake[MAG] = MaxMag
+    )
+````
