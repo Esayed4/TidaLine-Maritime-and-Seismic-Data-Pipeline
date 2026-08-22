@@ -19,10 +19,10 @@ The Seismic table is the same as the source with an addition of 2 columns
 
 
 ## Vessels
-The Seismic table is the same as the source with an addition of 2 columns
-1. generated at timestamp
-2. source name
-3. ingested at timestamp
+The Vessels are fully loaded every day without history tracking.  
+The Vessels table is the same as the source with an addition of 2 columns:  
+1. source name  
+2. ingested at timestamp  
 
 
 # **Silver Layer**
@@ -131,7 +131,18 @@ b. if the record received an update another day -> create new UNID and insert as
 
 ## Vessels
 The vessels require minimal transformation and only minor column are added such as   
+
+1. Enforce data types  
+a. Integer:   
+year_built / gross_tonnage / dead_weight / length(m) / beam(m) /  
+b. Decimal:
+destination_port_lat / destination_port_lon / 
+c. timestamp  
+departure_date / arrival_date / report_date / ingested_at 
+
+2. add columns  
 loaded_to_silver: timestamp
+
 
 
 # **Gold Layer**
@@ -202,7 +213,12 @@ supplies_index_category:        varchar: 5 is excellent, >=3 is good, 1>=1 is li
 3. add time column with time key: integer
 
 ## Vessels
-The vessels from the silver layer will be used as it is.
+a. renaming columns:  
+length(m) -> length_m  
+beam(m) -> beam_m  
+b. added columns: 
+ingested_timestamp  
+ingested_date   
 
 
 # **Semantic Layer** 
@@ -326,7 +342,7 @@ The actual code in M-Language is:
 
 a. create a parameter to set the max_distance
 ```SQL
-Max Distance (km) Value = SELECTEDVALUE('Max Distance (km)'[Max Distance (km)], 50)
+Max Distance (km) Value = SELECTEDVALUE('Max Distance (km)'[Max Distance (km)], 300)
 ```
 b. create a custom columns risk_score for the dim_port
 ```SQL
@@ -365,7 +381,7 @@ d. categorize
 
 
 ## Other Tables:
-A union of the ports and earthquakes tables is created in order to plot them together, the code in DAX in PowerBI is 
+A union of the ports and earthquakes tables is created in order to plot them together on one map, the code in DAX in PowerBI is 
 ```SQL
     Map_Points =
     UNION(
